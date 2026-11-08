@@ -13,13 +13,25 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.snovasys.ledgerline.config.CorsConfiguration;
 import com.snovasys.ledgerline.security.SecurityConfiguration;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-@WebMvcTest(HealthController.class)
+@WebMvcTest(
+        controllers = HealthController.class,
+        properties = {
+            "DB_URL=jdbc:postgresql://localhost:5432/ledgerline_test",
+            "DB_USERNAME=ledgerline_test",
+            "DB_PASSWORD=test-only-password",
+            "LEDGERLINE_JWT_SECRET=dGVzdC1zZWNyZXQtdGhhdC1pcy1hdC1sZWFzdC0zMi1ieXRlcy1sb25n"
+        })
 @Import({SecurityConfiguration.class, CorsConfiguration.class})
 class HealthControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
 
     @Test
     void healthEndpointIsPublicAndReportsServiceStatus() throws Exception {
@@ -31,7 +43,7 @@ class HealthControllerTest {
     @Test
     void unknownApiRoutesRequireAuthentication() throws Exception {
         mockMvc.perform(get("/api/future"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

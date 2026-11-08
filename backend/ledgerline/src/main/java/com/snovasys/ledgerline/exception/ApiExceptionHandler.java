@@ -1,12 +1,15 @@
 package com.snovasys.ledgerline.exception;
 
 import com.snovasys.ledgerline.dto.ApiErrorResponse;
+import com.snovasys.ledgerline.exception.DuplicateEmailException;
+import com.snovasys.ledgerline.exception.InvalidCredentialsException;
+import com.snovasys.ledgerline.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -14,7 +17,24 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ApiExceptionHandler.class);
+    @ExceptionHandler(DuplicateEmailException.class)
+    public ResponseEntity<ApiErrorResponse> handleDuplicateEmail(
+            DuplicateEmailException exception, HttpServletRequest request) {
+        return errorResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidCredentials(HttpServletRequest request) {
+        return errorResponse(
+                HttpStatus.UNAUTHORIZED,
+                "Email or password is incorrect.",
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleNotFound(HttpServletRequest request) {
+        return errorResponse(HttpStatus.NOT_FOUND, "The requested resource was not found.", request.getRequestURI());
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiErrorResponse> handleValidation(
@@ -25,10 +45,27 @@ public class ApiExceptionHandler {
                 request.getRequestURI());
     }
 
+    @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiErrorResponse> handleBadRequest(HttpServletRequest request) {
+        return errorResponse(
+                HttpStatus.BAD_REQUEST,
+                "The request is invalid.",
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleConflict(HttpServletRequest request) {
+        return errorResponse(
+                HttpStatus.CONFLICT,
+                "The request conflicts with an existing record.",
+                request.getRequestURI());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(
             Exception exception, HttpServletRequest request) {
-        LOGGER.error("Unhandled API error for {}", request.getRequestURI(), exception);
+        org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler.class)
+                .error("Unhandled API error for {} ({})", request.getRequestURI(), exception.getClass().getSimpleName());
         return errorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "An unexpected error occurred.",

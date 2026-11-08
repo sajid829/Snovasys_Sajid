@@ -37,3 +37,35 @@ This log records the actual Day 1 work in this repository. No commits or test re
 - API runtime health request: not run against a started application because database credentials are unavailable. The health endpoint is covered by the backend MVC test.
 - Credential-pattern scan found no matches. The only `.env*` files are the root and frontend `.env.example` placeholders.
 - Git submission outcome is reported in the final delivery summary; no commit is claimed in this prompt log.
+
+## Day 2 — 8 November 2026
+
+### Actual user prompt
+
+The user requested implementation of registration/login, BCrypt, JWT authentication and logout invalidation, the ADMIN/ACCOUNT_HOLDER/AUDITOR roles, owner-scoped account creation and read APIs, a React auth/dashboard flow, additive Flyway migrations, meaningful backend security/service tests, and updates to README/PROMPTS/THREATS. The user noted that PostgreSQL credentials are not yet configured and explicitly prohibited weakening database authentication or Flyway to bypass this.
+
+### Implementation decisions
+
+- Public registration always provisions `ACCOUNT_HOLDER`; a role cannot be submitted at registration. A trusted DBA must promote the first administrator directly after registration. Admin user changes are ADMIN-only.
+- Access tokens are short-lived HMAC-SHA256 JWTs. Database-backed `token_version`, enabled state, and current role are checked for each token; logout and access changes increment the version to revoke existing tokens.
+- The frontend keeps the access token in memory only. Account API requests send only account type on creation; authenticated identity supplies the owner. Monetary balances are server-created zero values and serialized as decimal strings.
+- Added V2 as a new Flyway migration; V1 was preserved. The new schema uses UUID keys, unique case-normalized emails/account numbers, role/type/status checks, ownership foreign keys/indexes, and `numeric(19,2)` balances.
+- No PostgreSQL-backed test database or extra persistence framework was introduced. Tests exercise service behavior and Spring Security MVC authorization without pretending to verify live database persistence.
+
+### Problems and corrections
+
+- A first backend compile found that Spring's `Jwt` API has no `getClaimAsLong`; logout now reads the numeric token-version claim and converts it to a long.
+- Initial MVC authorization tests used Spring Security's test JWT shortcut, which did not exercise the configured role-claim converter. They now pass a Bearer token through the real filter chain with a mocked decoder, so the role converter and request matchers are exercised.
+- JWT tests found issuer claims must be valid URI values and that JWT timestamps serialize to second precision. The configured issuer is a URI and issued timestamps are truncated to seconds.
+- The first frontend lint pass found effect state-update and Fast Refresh warnings. Data loading is asynchronous/cancellable, and the auth hook was moved into its own hook module.
+- A security review found the unknown-user login path's dummy BCrypt hash used a lower work factor than real passwords. It is now generated with the configured encoder so both paths use the same cost.
+- Existing, uncommitted PostgreSQL environment-variable fixes from the preceding user request were preserved and extended with the required JWT secret; neither DB passwords nor signing keys were added to source.
+
+### Verification
+
+- Backend `.\mvnw.cmd clean verify`: passed; 29 tests, 0 failures, 0 errors, 0 skipped.
+- Frontend `npm install`: completed; npm reported 0 vulnerabilities.
+- Frontend `npm run build`: passed.
+- Frontend `npm run lint`: passed.
+- PostgreSQL migration/connectivity: not verified because database credentials are not configured. No live database result is claimed.
+- Git submission: final commit and push status is reported in the delivery summary.

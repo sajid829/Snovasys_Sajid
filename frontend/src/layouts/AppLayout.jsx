@@ -1,8 +1,9 @@
 import BrandMark from '../components/BrandMark'
 import Navigation from '../components/Navigation'
 import PageHeader from '../components/PageHeader'
+import { Outlet } from 'react-router-dom'
 
-function AppLayout({ children }) {
+function AppLayout() {
   return (
     <div className="min-h-screen bg-[#f7f8fa] text-slate-950">
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
@@ -27,7 +28,9 @@ function AppLayout({ children }) {
           </div>
           <Navigation compact />
           <PageHeader />
-          <main className="w-full flex-1 px-4 py-7 sm:px-8 sm:py-9">{children}</main>
+          <main className="w-full flex-1 px-4 py-7 sm:px-8 sm:py-9">
+            <Outlet />
+          </main>
           <footer className="border-t border-slate-200 px-4 py-5 text-center text-xs text-slate-500 sm:px-8">
             LedgerLine · Financial activity will be shown only when confirmed by the backend.
           </footer>

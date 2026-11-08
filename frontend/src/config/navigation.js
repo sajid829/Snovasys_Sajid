@@ -1,9 +1,7 @@
 const navigationItems = [
-  { label: 'Overview', state: 'available' },
-  { label: 'Accounts', state: 'planned' },
-  { label: 'Transfers', state: 'planned' },
-  { label: 'Statements', state: 'planned' },
-  { label: 'Audit trail', state: 'planned' },
+  { label: 'Overview', href: '/', state: 'available' },
+  { label: 'Accounts', href: '/#accounts', state: 'available' },
+  { label: 'User management', href: '/admin/users', roles: ['ADMIN'], state: 'available' },
 ]
 
 export default navigationItems
