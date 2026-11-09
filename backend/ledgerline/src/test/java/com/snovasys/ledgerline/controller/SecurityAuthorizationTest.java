@@ -104,13 +104,30 @@ class SecurityAuthorizationTest {
         mockMvc.perform(post("/api/accounts")
                         .with(bearerToken(accountHolderId, Role.ACCOUNT_HOLDER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"accountType\":\"SAVINGS\"}"))
+                        .content("{\"accountType\":\"SAVINGS\","
+                                + "\"ownerId\":\"" + adminId + "\","
+                                + "\"userId\":\"" + adminId + "\","
+                                + "\"role\":\"ADMIN\"}"))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(get("/api/admin/users").with(bearerToken(accountHolderId, Role.ACCOUNT_HOLDER)))
                 .andExpect(status().isForbidden());
 
         verify(accountService).create(eq(accountHolderId), any(CreateAccountRequest.class));
+        verify(adminUserService, never()).list();
+    }
+
+    @Test
+    void unauthenticatedRequestsCannotReadAccountsOrManageUsers() throws Exception {
+        mockMvc.perform(get("/api/accounts")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/admin/users")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountType\":\"CHECKING\"}"))
+                .andExpect(status().isUnauthorized());
+
+        verify(accountService, never()).list(any(), any());
+        verify(accountService, never()).create(any(), any());
         verify(adminUserService, never()).list();
     }
 

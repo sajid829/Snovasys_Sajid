@@ -1,6 +1,7 @@
 package com.snovasys.ledgerline.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -15,6 +16,7 @@ import com.snovasys.ledgerline.entity.UserEntity;
 import com.snovasys.ledgerline.exception.ResourceNotFoundException;
 import com.snovasys.ledgerline.repository.BankAccountRepository;
 import com.snovasys.ledgerline.repository.UserRepository;
+import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -45,8 +47,24 @@ class AccountServiceTest {
         assertEquals(owner, account.getOwner());
         assertEquals(AccountType.SAVINGS, account.getAccountType());
         assertEquals("0.00", account.getBalance().toPlainString());
+        assertInstanceOf(BigDecimal.class, account.getBalance());
         assertEquals(16, account.getAccountNumber().length());
         assertEquals("0.00", response.balance());
+    }
+
+    @Test
+    void accountNumberCollisionIsCheckedAndRetriedBeforeSaving() {
+        var owner = new UserEntity("owner@example.com", "hash", Role.ACCOUNT_HOLDER);
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(accountRepository.existsByAccountNumber(any())).thenReturn(true, false);
+        when(accountRepository.saveAndFlush(any(BankAccountEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = accountService.create(ownerId, new CreateAccountRequest(AccountType.CHECKING));
+
+        assertEquals(16, response.accountNumber().length());
+        verify(accountRepository, org.mockito.Mockito.times(2)).existsByAccountNumber(any());
+        verify(accountRepository).saveAndFlush(any(BankAccountEntity.class));
     }
 
     @Test
@@ -69,10 +87,32 @@ class AccountServiceTest {
     }
 
     @Test
+    void accountHolderDetailLookupIncludesAuthenticatedOwner() {
+        UUID accountId = UUID.randomUUID();
+        var owner = new UserEntity("owner@example.com", "hash", Role.ACCOUNT_HOLDER);
+        var account = new BankAccountEntity("1234567890123456", owner, AccountType.CHECKING);
+        when(accountRepository.findByIdAndOwner_Id(accountId, ownerId))
+                .thenReturn(Optional.of(account));
+
+        var response = accountService.get(accountId, ownerId, Role.ACCOUNT_HOLDER);
+
+        assertEquals("1234567890123456", response.accountNumber());
+        verify(accountRepository, never()).findById(accountId);
+    }
+
+    @Test
     void auditorCanReadAllAccountsWithoutWriteCapabilitiesInService() {
         accountService.list(ownerId, Role.AUDITOR);
 
         verify(accountRepository).findAllByOrderByCreatedAtDesc();
         verify(accountRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void administratorAccountListIsNotOwnerScoped() {
+        accountService.list(ownerId, Role.ADMIN);
+
+        verify(accountRepository).findAllByOrderByCreatedAtDesc();
+        verify(accountRepository, never()).findAllByOwner_IdOrderByCreatedAtDesc(any());
     }
 }
