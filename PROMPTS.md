@@ -69,3 +69,26 @@ The user requested implementation of registration/login, BCrypt, JWT authenticat
 - Frontend `npm run lint`: passed.
 - PostgreSQL migration/connectivity: not verified because database credentials are not configured. No live database result is claimed.
 - Git submission: final commit and push status is reported in the delivery summary.
+
+## Day 3 — 12 November 2026
+
+### Actual user prompt
+
+The user requested implementation-first inspection of the existing LedgerLine project, preserving Day 1/Day 2 work while adding authorized deposits, withdrawals, transfers, immutable double-entry ledger records, database transactions, concurrency controls, idempotency, dashboard operations/history, tests, documentation, and verification of Git push readiness. The requested runtime is Java 21, Spring Boot 3.5, and PostgreSQL 17.
+
+### Implementation decisions
+
+- Preserved existing authentication, roles, owner-scoped account APIs, and frontend. ACCOUNT_HOLDER-only transaction methods derive the actor from the verified JWT and check ownership server-side; Admin/Auditor are read-only.
+- Added V3 as an additive migration. It creates successful transaction records with actor-scoped idempotency uniqueness, two ledger lines per transaction, deferred database enforcement of amount-matched balanced debit/credit legs, and update/delete-blocking triggers for financial transaction and ledger rows.
+- Monetary input and arithmetic use `BigDecimal`; request validation and service validation reject non-positive, over-precision values. Database columns are `numeric(19,2)`.
+- Account rows are pessimistically locked inside Spring transactions. Transfers acquire both account locks in UUID order and debit/credit within one transaction.
+- Frontend requests use exact decimal text for JSON monetary numbers and retain an idempotency key across retries of the same form request. Account balance/history are refreshed from API responses; no sample financial data or synthetic success is shown.
+- The worktree contained concurrent changes switching the POM/README from Java 21 to Java 25 after initial inspection. The user explicitly chose Java 21; those two files were aligned with the requested Java 21 runtime. Existing CORS edits and `LOCAL_SETUP.md` remain untouched.
+- Rejected-attempt audit records were not implemented. History shows successful transactions only. PostgreSQL integration, migration execution, and concurrent-database behavior remain unverified due to absent DB credentials.
+
+### Verification
+
+- Backend Maven tests: 43 tests passed using Mockito and Spring MVC/security-slice tests. The financial service tests are mock-based; they do not prove PostgreSQL behavior.
+- Frontend production build: passed with Vite.
+- Frontend lint: passed with oxlint.
+- No PostgreSQL-backed migration, trigger, rollback, or concurrency test has run. No deployment, commit, or push is claimed until verified in the final submission status.

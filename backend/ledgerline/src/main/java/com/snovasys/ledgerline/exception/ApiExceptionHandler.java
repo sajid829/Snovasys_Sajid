@@ -2,6 +2,8 @@ package com.snovasys.ledgerline.exception;
 
 import com.snovasys.ledgerline.dto.ApiErrorResponse;
 import com.snovasys.ledgerline.exception.DuplicateEmailException;
+import com.snovasys.ledgerline.exception.IdempotencyConflictException;
+import com.snovasys.ledgerline.exception.InsufficientFundsException;
 import com.snovasys.ledgerline.exception.InvalidCredentialsException;
 import com.snovasys.ledgerline.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,6 +36,22 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleNotFound(HttpServletRequest request) {
         return errorResponse(HttpStatus.NOT_FOUND, "The requested resource was not found.", request.getRequestURI());
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ResponseEntity<ApiErrorResponse> handleIdempotencyConflict(HttpServletRequest request) {
+        return errorResponse(
+                HttpStatus.CONFLICT,
+                "The idempotency key conflicts with an earlier transaction.",
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ResponseEntity<ApiErrorResponse> handleInsufficientFunds(HttpServletRequest request) {
+        return errorResponse(
+                HttpStatus.CONFLICT,
+                "The account has insufficient funds.",
+                request.getRequestURI());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

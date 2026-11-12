@@ -42,6 +42,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/accounts/**").hasRole("ACCOUNT_HOLDER")
+                        .requestMatchers(HttpMethod.POST, "/api/transfers").hasRole("ACCOUNT_HOLDER")
                         .requestMatchers(HttpMethod.GET, "/api/accounts/**")
                         .hasAnyRole("ADMIN", "ACCOUNT_HOLDER", "AUDITOR")
                         .anyRequest().authenticated())

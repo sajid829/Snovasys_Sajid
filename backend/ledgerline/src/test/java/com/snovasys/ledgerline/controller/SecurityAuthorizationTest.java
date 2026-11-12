@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.snovasys.ledgerline.config.CorsConfiguration;
 import com.snovasys.ledgerline.dto.AccountResponse;
 import com.snovasys.ledgerline.dto.CreateAccountRequest;
+import com.snovasys.ledgerline.dto.TransactionResponse;
 import com.snovasys.ledgerline.entity.AccountStatus;
 import com.snovasys.ledgerline.entity.AccountType;
 import com.snovasys.ledgerline.entity.Role;
@@ -20,6 +21,7 @@ import com.snovasys.ledgerline.security.SecurityConfiguration;
 import com.snovasys.ledgerline.service.AccountService;
 import com.snovasys.ledgerline.service.AdminUserService;
 import com.snovasys.ledgerline.service.AuthService;
+import com.snovasys.ledgerline.service.FinancialTransactionService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +40,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
         controllers = {
             HealthController.class,
             AccountController.class,
+            FinancialTransactionController.class,
             AdminUserController.class,
             AuthController.class
         },
@@ -65,6 +68,9 @@ class SecurityAuthorizationTest {
     @MockitoBean
     private AuthService authService;
 
+    @MockitoBean
+    private FinancialTransactionService financialTransactionService;
+
     private final UUID accountHolderId = UUID.randomUUID();
     private final UUID auditorId = UUID.randomUUID();
     private final UUID adminId = UUID.randomUUID();
@@ -81,11 +87,21 @@ class SecurityAuthorizationTest {
                         .content("{\"accountType\":\"SAVINGS\"}"))
                 .andExpect(status().isForbidden());
 
+        mockMvc.perform(post("/api/transfers")
+                        .with(bearerToken(auditorId, Role.AUDITOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "forbidden-transfer")
+                        .content("{\"sourceAccountId\":\"" + UUID.randomUUID()
+                                + "\",\"destinationAccountId\":\"" + UUID.randomUUID()
+                                + "\",\"amount\":1.00}"))
+                .andExpect(status().isForbidden());
+
         mockMvc.perform(get("/api/admin/users").with(bearerToken(auditorId, Role.AUDITOR)))
                 .andExpect(status().isForbidden());
 
         verify(accountService).list(auditorId, Role.AUDITOR);
         verify(accountService, never()).create(any(), any());
+        verify(financialTransactionService, never()).transfer(any(), any(), any(), any(), any());
         verify(adminUserService, never()).list();
     }
 
@@ -125,10 +141,42 @@ class SecurityAuthorizationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"accountType\":\"CHECKING\"}"))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/transfers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "unauthenticated")
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
 
         verify(accountService, never()).list(any(), any());
         verify(accountService, never()).create(any(), any());
+        verify(financialTransactionService, never()).transfer(any(), any(), any(), any(), any());
         verify(adminUserService, never()).list();
+    }
+
+    @Test
+    void accountHolderCanSubmitDepositWithAuthenticatedIdentityAndIdempotencyKey() throws Exception {
+        UUID accountId = UUID.randomUUID();
+        when(financialTransactionService.deposit(
+                        eq(accountHolderId), eq(accountId), eq(new java.math.BigDecimal("10.00")), eq("deposit-1")))
+                .thenReturn(new TransactionResponse(
+                        UUID.randomUUID(),
+                        com.snovasys.ledgerline.entity.FinancialTransactionType.DEPOSIT,
+                        com.snovasys.ledgerline.entity.FinancialTransactionStatus.COMPLETED,
+                        "CREDIT",
+                        "10.00",
+                        "INR",
+                        "CASH",
+                        Instant.now()));
+
+        mockMvc.perform(post("/api/accounts/" + accountId + "/deposits")
+                        .with(bearerToken(accountHolderId, Role.ACCOUNT_HOLDER))
+                        .header("Idempotency-Key", "deposit-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":10.00}"))
+                .andExpect(status().isOk());
+
+        verify(financialTransactionService).deposit(
+                eq(accountHolderId), eq(accountId), eq(new java.math.BigDecimal("10.00")), eq("deposit-1"));
     }
 
     @Test

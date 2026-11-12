@@ -1,26 +1,24 @@
 # LedgerLine
 
-LedgerLine is a financial application for authenticated banking accounts and, in later iterations, traceable money movement with a balanced ledger. Day 2 adds JWT authentication, server-enforced roles, account ownership, and read-only account views. Deposits, withdrawals, transfers, and ledger operations remain unimplemented.
+LedgerLine is a financial application for authenticated banking accounts and traceable money movement. Day 3 adds deposits, withdrawals, transfers, and an append-only double-entry ledger. PostgreSQL execution and deployment have not yet been verified in this environment.
 
 ## Challenge requirements and progress
 
 The official [LedgerLine problem statement](https://hackathon.snovasys.com/project/768) describes safe, authorized, traceable money movement. The [official event instructions](https://hackathon.snovasys.com/event/3) require a working system, public GitHub repository, live website, tests, and a README that enables a stranger to run it. No separate marking scheme or scoring weights were published in the material checked on 7 November 2026.
 
-| Requirement | Day 2 status |
+| Requirement | Implementation status |
 |---|---|
 | Administrator, Account Holder, and Read-only Auditor authentication and roles | Registration/login and API role authorization implemented; first administrator requires trusted DBA provisioning |
 | Account creation, balance viewing, and statements | Account creation and balance viewing implemented; statements not implemented |
-| Deposits, withdrawals, and transfers | Not implemented |
-| Double-entry accounting and money conservation | Not implemented |
-| Server-side prevention of negative balances | Not implemented |
-| Idempotency and duplicate request prevention | Not implemented |
-| Concurrent transaction safety | Not implemented |
-| Complete transaction and audit history, including refused attempts | Not implemented |
-| Backend account ownership and authorization checks | Implemented for account reads and creation; ownership comes from the authenticated JWT |
-| Financial integrity, concurrency, idempotency, and access-control tests | Authentication, account ownership, and authorization tests implemented; financial integrity/concurrency/idempotency tests remain unimplemented |
+| Deposits, withdrawals, and transfers | Implemented in transactional account APIs; source/destination account holder ownership is checked server-side |
+| Double-entry accounting and money conservation | Two immutable entries per transaction, with a deferred PostgreSQL trigger enforcing exact debit/credit totals and matching transaction amounts |
+| Server-side prevention of negative balances | Positive monetary inputs are validated and account debit checks are paired with a PostgreSQL nonnegative-balance constraint |
+| Idempotency and duplicate request prevention | `Idempotency-Key` is unique per authenticated actor; exact repeats replay the prior transaction, mismatched key reuse conflicts |
+| Concurrent transaction safety | Account rows are locked pessimistically in deterministic ID order inside database transactions; concurrent PostgreSQL behavior has not been exercised here |
+| Complete transaction and audit history, including refused attempts | Successful history is available; rejected-attempt audit events are not persisted |
+| Backend account ownership and authorization checks | Account-holder operations use authenticated identity and owner checks; Admin/Auditor are read-only |
+| Financial integrity, concurrency, idempotency, and access-control tests | Mockito service tests and MVC/security-slice tests pass; no PostgreSQL integration/concurrency test has run |
 | Public deployment/live website | Not deployed |
-
-These features must be implemented and tested before they are described as complete.
 
 ## Technology
 
@@ -89,7 +87,7 @@ CREATE DATABASE ledgerline_db OWNER ledgerline_app;
 
 The `\password` command prompts securely for a role password in `psql`. If the role already exists, use `\password ledgerline_app` to set/reset its password and skip `CREATE ROLE`.
 
-Flyway applies `src/main/resources/db/migration` on backend startup. V1 creates the `ledgerline` schema; V2 creates the user and account tables, role constraints, indexes, foreign key, and `numeric(19,2)` balance column. Do not edit migrations after they have been applied.
+Flyway applies `src/main/resources/db/migration` on backend startup. V1 creates the `ledgerline` schema; V2 creates user and account tables and the `numeric(19,2)` balance; V3 creates successful financial transaction records, actor-scoped idempotency uniqueness, two-leg ledger entries, deferred balanced-entry constraints, and database triggers preventing ledger/transaction updates or deletes. Do not edit migrations after they have been applied. Migration V3 has not yet been run against the local PostgreSQL instance.
 
 Public registration always assigns `ACCOUNT_HOLDER`. For the first administrator, register the intended account normally, then have a trusted PostgreSQL administrator promote that specific account:
 
@@ -110,7 +108,7 @@ From `backend/ledgerline` in PowerShell:
 .\mvnw.cmd spring-boot:run
 ```
 
-The public routes are `GET /api/health`, `POST /api/auth/register`, and `POST /api/auth/login`. All other routes require a valid Bearer token. The frontend keeps the access token in memory only; signing out increments the user's token version, invalidating all of their issued tokens.
+The public routes are `GET /api/health`, `POST /api/auth/register`, and `POST /api/auth/login`. All other routes require a valid Bearer token. Money movement requires `ACCOUNT_HOLDER`. The frontend keeps the access token in memory only; signing out increments the user's token version, invalidating all of their issued tokens.
 
 ## Authentication and authorization APIs
 
@@ -122,15 +120,21 @@ The public routes are `GET /api/health`, `POST /api/auth/register`, and `POST /a
 | `GET /api/accounts` | Any role | Account holders receive only their accounts; ADMIN/AUDITOR receive the permitted account list |
 | `POST /api/accounts` | ACCOUNT_HOLDER | Creates an owned account with a server-generated number and a zero balance |
 | `GET /api/accounts/{accountId}` | Any role | Account holders can read only owned accounts; ADMIN/AUDITOR may read all |
+| `POST /api/accounts/{accountId}/deposits` | ACCOUNT_HOLDER | Deposits a positive INR amount; requires `Idempotency-Key` |
+| `POST /api/accounts/{accountId}/withdrawals` | ACCOUNT_HOLDER | Withdraws a positive amount if funds are sufficient; requires `Idempotency-Key` |
+| `POST /api/transfers` | ACCOUNT_HOLDER | Transfers between two owned, active accounts; requires `Idempotency-Key` |
+| `GET /api/accounts/{accountId}/transactions` | Any role | Returns account history; account holders are owner-scoped |
 | `GET /api/admin/users` | ADMIN | Lists user summaries without password hashes |
 | `PATCH /api/admin/users/{userId}` | ADMIN | Changes role or enabled status; role/status changes revoke existing tokens |
 
 Registration JSON: `{"email":"person@example.com","password":"at-least-12-characters"}`. Account creation JSON: `{"accountType":"CHECKING"}` or `{"accountType":"SAVINGS"}`. A client cannot submit a user ID, role, account owner, status, account number, or balance to these operations.
 
+Deposit/withdrawal JSON is `{"amount":25.50}`. Transfer JSON is `{"sourceAccountId":"<uuid>","destinationAccountId":"<uuid>","amount":25.50}`. Each money movement requires a unique `Idempotency-Key` request header (up to 128 characters). Retrying the same actor/key and exact request returns the original transaction; reusing the key for different transaction details returns `409`. Amounts must be positive, have at most two decimal places, and fit PostgreSQL `NUMERIC(19,2)`. Transfer accounts must both belong to the authenticated account holder and use the same currency.
+
 ### Roles
 
 - **ADMIN:** lists and manages users, and reads all account records.
-- **ACCOUNT_HOLDER:** creates accounts and reads only their own accounts and balances.
+- **ACCOUNT_HOLDER:** creates accounts, reads only their own accounts and balances, and can transact only on their own active accounts.
 - **AUDITOR:** reads account records without write access.
 
 Role authorization is enforced in Spring Security; account ownership is additionally enforced by owner-filtered repository lookups. Admins cannot disable/demote themselves, and the final enabled admin cannot be removed.
@@ -154,7 +158,7 @@ npm install
 npm run dev
 ```
 
-The Vite development server starts at `http://localhost:5173`. Set `VITE_API_BASE_URL` in `frontend/.env.local` to change the API base URL. The initial dashboard checks the real health endpoint and displays no fabricated balances, accounts, or transactions.
+The Vite development server starts at `http://localhost:5173`. Set `VITE_API_BASE_URL` in `frontend/.env.local` to change the API base URL. The dashboard and account pages display API-backed accounts, balances, transaction history, and transaction outcomes. Money actions are available only to account holders; no seeded or fabricated financial data is shown.
 
 ## Run and build
 
@@ -163,7 +167,26 @@ Open two terminals:
 1. Start PostgreSQL and the backend using the database environment variables above and `.\mvnw.cmd spring-boot:run`.
 2. In `frontend`, run `npm run dev`.
 
-Build and lint the frontend with `npm run build` and `npm run lint`. Run backend tests with `.\mvnw.cmd test`. The current backend tests are unit and MVC/security-slice tests; they do not prove PostgreSQL migration or live database connectivity.
+Build and lint the frontend with `npm run build` and `npm run lint`. Run backend tests with `.\mvnw.cmd test`. Backend transaction tests use Mockito mocks; MVC tests mock service beans and JWT decoding. No test in this repository has verified the V3 migration, PostgreSQL row locks, database trigger behavior, or concurrent withdrawal safety against a live PostgreSQL server. Use the actual database credentials and verify the startup migration before submitting/deploying.
+
+### Financial integrity and limitations
+
+- Every successful operation changes balance and writes one financial transaction plus exactly two ledger entries in one Spring `@Transactional` unit of work.
+- Deposits debit the system `CASH` ledger leg and credit the customer account; withdrawals debit the customer account and credit `CASH`; transfers debit the source and credit the destination.
+- The database checks exactly two lines, one debit and one credit, both equal to the transaction amount, attached to the expected accounts; balance rows are constrained nonnegative.
+- Pessimistic account-row locks serialize writes. Transfers acquire both account locks in UUID order to reduce deadlocks.
+- Ledger and transaction records are append-only under database triggers and have no update/delete API.
+- Transaction history contains successful transactions only. Failed/rejected attempts are not durably audited, and there is no dispute/chargeback, external payment rail, FX, or reconciliation workflow.
+
+## Deployment and submission checklist
+
+1. Provision PostgreSQL 17, create a dedicated least-privilege application role and database, and configure `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, and a stable randomly generated `LEDGERLINE_JWT_SECRET` in the deployment secret manager.
+2. Set `CORS_ALLOWED_ORIGINS` to the exact production frontend origin(s); use TLS at the public ingress and do not deploy local origins as the only allowed origins.
+3. Build/test the backend with `cd backend/ledgerline` and `.\mvnw.cmd clean verify`; build the frontend from `frontend` with `npm ci`, `npm run lint`, and `npm run build`.
+4. Start the backend against the provisioned PostgreSQL database and confirm Flyway V1–V3 complete successfully. The V3 migration has not been run against PostgreSQL as part of this implementation session.
+5. Deploy the generated frontend `dist` directory to a static web host and set `VITE_API_BASE_URL` at build time to the deployed API base URL. Configure SPA fallback routing for `/accounts/*` and `/admin/*`.
+6. Smoke-test registration/login, account creation, deposit, withdrawal, same-owner transfer, transaction history, and a rejected overdraft using a non-production account. Confirm the balances and ledger rows directly using trusted database access.
+7. Publish the verified repository URL and deployed URLs in the hackathon submission form. No commit, push, or live deployment is claimed until it is actually completed and verified.
 
 ## API health
 
